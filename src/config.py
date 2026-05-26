@@ -11,7 +11,7 @@ class ModelConfig:
     filters: int = 384
     num_blocks: int = 10
     policy_channels: int = 32
-    policy_output_size: int = 4096
+    policy_output_size: int = 20480  # 64 × 64 × 5 (from × to × promotion)
     value_hidden: int = 256
     dropout: float = 0.1
     activation: str = "swiglu"

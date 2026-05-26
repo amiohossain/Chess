@@ -88,8 +88,11 @@ def _count_repetitions(board: chess.Board) -> int:
     return 0
 
 
+NUM_MOVES = 20480  # 64 from-squares × 64 to-squares × 5 promotion types (none + Q/R/B/N)
+
+
 def encode_move(move: chess.Move, board: chess.Board) -> int:
-    """Encode a move as an index in [0, 4095].
+    """Encode a move as an index in [0, 20479].
 
     Index = from_square + 64 * to_square + 4096 * promotion
     """
@@ -114,8 +117,8 @@ def decode_move(move_idx: int, board: chess.Board) -> chess.Move:
 
 
 def legal_move_mask(board: chess.Board) -> np.ndarray:
-    """Return a binary mask of shape (4096,) with 1s for legal moves."""
-    mask = np.zeros(4096, dtype=np.float32)
+    """Return a binary mask of shape (NUM_MOVES,) with 1s for legal moves."""
+    mask = np.zeros(NUM_MOVES, dtype=np.float32)
     for move in board.legal_moves:
         idx = encode_move(move, board)
         mask[idx] = 1.0

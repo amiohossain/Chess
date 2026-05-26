@@ -7,6 +7,7 @@ from src.model.feature_encoder import (
     encode_move,
     decode_move,
     legal_move_mask,
+    NUM_MOVES,
 )
 
 
@@ -60,7 +61,7 @@ class TestMoveEncoding:
     def test_legal_move_mask_starting_position(self):
         board = chess.Board()
         mask = legal_move_mask(board)
-        assert mask.shape == (4096,)
+        assert mask.shape == (NUM_MOVES,)
         assert mask.sum() == 20
         assert all(m == 1.0 or m == 0.0 for m in mask)
 
