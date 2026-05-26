@@ -46,7 +46,6 @@ class TrapConfig:
     """Trap specialization hyperparameters."""
     trap_data_ratio: float = 0.5
     trap_oversample: int = 3
-    trap_loss_weight: float = 2.0
     trap_positional_threshold: float = 0.1
     trap_boost_factor: float = 1.2
     trap_guard_threshold: float = -0.3
