@@ -3,3 +3,4 @@ python-chess>=1.999
 numpy>=1.24
 h5py>=3.8
 tqdm>=4.65
+scipy>=1.10
