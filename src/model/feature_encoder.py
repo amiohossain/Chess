@@ -76,7 +76,7 @@ def encode_board(board: chess.Board) -> np.ndarray:
     if rep_count >= 2:
         planes[21, :, :] = 1.0
 
-    return planes.astype(np.float32)
+    return planes
 
 
 def _count_repetitions(board: chess.Board) -> int:

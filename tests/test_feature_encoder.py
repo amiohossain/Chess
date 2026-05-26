@@ -69,3 +69,26 @@ class TestMoveEncoding:
         board = chess.Board("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4")
         mask = legal_move_mask(board)
         assert mask.sum() > 20
+
+    def test_promotion_roundtrip(self):
+        board = chess.Board("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
+        move = chess.Move.from_uci("a7a8q")
+        idx = encode_move(move, board)
+        decoded = decode_move(idx, board)
+        assert decoded == move
+
+    def test_reserved_planes_are_zero(self):
+        board = chess.Board()
+        planes = encode_board(board)
+        assert (planes[22:, :, :] == 0.0).all()
+
+    def test_repetition_planes(self):
+        board = chess.Board()
+        planes = encode_board(board)
+        assert planes[20, 0, 0] == 0.0
+        assert planes[21, 0, 0] == 0.0
+
+    def test_halfmove_clock_plane(self):
+        board = chess.Board("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 5 3")
+        planes = encode_board(board)
+        assert planes[18, 0, 0] == 5.0 / 100.0
