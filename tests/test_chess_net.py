@@ -16,7 +16,7 @@ class TestChessNet:
 
     def test_forward_output_shapes(self, model, sample_input):
         policy, value = model(sample_input)
-        assert policy.shape == (4, 20480), f"Expected (4, 20480), got {policy.shape}"
+        assert policy.shape == (4, 4096), f"Expected (4, 4096), got {policy.shape}"
         assert value.shape == (4, 1), f"Expected (4, 1), got {value.shape}"
 
     def test_value_in_range(self, model, sample_input):
@@ -27,11 +27,11 @@ class TestChessNet:
         config = ModelConfig(filters=384, num_blocks=10)
         model = ChessNet(config)
         total_params = sum(p.numel() for p in model.parameters())
-        assert 70_000_000 < total_params < 75_000_000
+        assert 30_000_000 < total_params < 45_000_000
 
     def test_policy_masking(self, model):
-        logits = torch.randn(2, 20480)
-        mask = torch.zeros(2, 20480)
+        logits = torch.randn(2, 4096)
+        mask = torch.zeros(2, 4096)
         mask[:, :10] = 1.0
         probs = model.get_policy(logits, mask)
         assert torch.allclose(probs.sum(dim=1), torch.ones(2))

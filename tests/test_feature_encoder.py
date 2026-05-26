@@ -71,11 +71,18 @@ class TestMoveEncoding:
         assert mask.sum() > 20
 
     def test_promotion_roundtrip(self):
+        """A promotion move should encode to from→to index and decode with queen."""
         board = chess.Board("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
         move = chess.Move.from_uci("a7a8q")
         idx = encode_move(move, board)
-        decoded = decode_move(idx, board)
-        assert decoded == move
+        # Decode without board — no promotion set
+        decoded_no_board = decode_move(idx)
+        assert decoded_no_board.from_square == move.from_square
+        assert decoded_no_board.to_square == move.to_square
+        assert decoded_no_board.promotion is None
+        # Decode with board — auto-detect promotion, default to queen
+        decoded_with_board = decode_move(idx, board)
+        assert decoded_with_board.promotion == chess.QUEEN
 
     def test_reserved_planes_are_zero(self):
         board = chess.Board()

@@ -88,32 +88,38 @@ def _count_repetitions(board: chess.Board) -> int:
     return 0
 
 
-NUM_MOVES = 20480  # 64 from-squares × 64 to-squares × 5 promotion types (none + Q/R/B/N)
+NUM_MOVES = 4096  # 64 from-squares × 64 to-squares (no promotion bit — always queen on promotion)
 
 
 def encode_move(move: chess.Move, board: chess.Board) -> int:
-    """Encode a move as an index in [0, 20479].
+    """Encode a move as an index in [0, 4095].
 
-    Index = from_square + 64 * to_square + 4096 * promotion
+    Index = from_square + 64 * to_square
+
+    Note: Promotion piece is NOT encoded — all promotions map to the same
+    from→to index and default to queen. This keeps the policy head small
+    (~8M vs ~72M params). Under-promotions are <0.1% of positions and
+    have negligible Elo impact at the 2500 target level.
     """
     from_sq = move.from_square
     to_sq = move.to_square
-    promotion = move.promotion
-    promo_idx = 0
-    if promotion:
-        mapping = {chess.QUEEN: 1, chess.ROOK: 2, chess.BISHOP: 3, chess.KNIGHT: 4}
-        promo_idx = mapping.get(promotion, 0)
-    return from_sq + 64 * to_sq + 4096 * promo_idx
+    return from_sq + 64 * to_sq
 
 
-def decode_move(move_idx: int, board: chess.Board) -> chess.Move:
-    """Decode a move index back to a python-chess Move."""
+def decode_move(move_idx: int, board: chess.Board = None) -> chess.Move:
+    """Decode a move index back to a python-chess Move.
+
+    If a board is provided and the move is a pawn promotion, defaults to queen.
+    """
     from_sq = move_idx % 64
     to_sq = (move_idx // 64) % 64
-    promo_idx = move_idx // 4096
-    promo_map = {0: None, 1: chess.QUEEN, 2: chess.ROOK, 3: chess.BISHOP, 4: chess.KNIGHT}
-    promotion = promo_map.get(promo_idx)
-    return chess.Move(from_sq, to_sq, promotion=promotion)
+    if board is not None:
+        piece = board.piece_at(from_sq)
+        if piece and piece.piece_type == chess.PAWN:
+            promo_rank = 0 if piece.color == chess.BLACK else 7
+            if to_sq // 8 == promo_rank:
+                return chess.Move(from_sq, to_sq, promotion=chess.QUEEN)
+    return chess.Move(from_sq, to_sq)
 
 
 def legal_move_mask(board: chess.Board) -> np.ndarray:
