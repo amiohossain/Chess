@@ -66,18 +66,13 @@ def combined_loss(
 def _top10_mask(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """Create a mask selecting non-target top-10 moves for margin penalty.
 
-    Returns a mask with +1 for non-target top-10 moves, 0 elsewhere.
-    Used with F.relu(logits - target_logit) so only distractors that beat
-    the target contribute loss — bounded below by 0.
+    Vectorized — no Python loops. Gathers top-10 indices for all batch
+    elements at once via scatter_.
     """
-    batch_size = logits.size(0)
+    top10 = logits.topk(10, dim=1).indices  # (batch, 10)
     mask = torch.zeros_like(logits)
-
-    for i in range(batch_size):
-        top10_indices = logits[i].topk(10).indices
-        for idx in top10_indices:
-            if idx != targets[i]:
-                mask[i, idx] = 1.0
-        # target gets 0 — we penalize the crowd around it, not the target itself
-
+    # Mark all top-10 positions as 1
+    mask.scatter_(1, top10, 1.0)
+    # Zero out the target position so we only penalize distractors
+    mask.scatter_(1, targets.unsqueeze(1), 0.0)
     return mask
