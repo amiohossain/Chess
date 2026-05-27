@@ -97,6 +97,7 @@ def play_self_play_game(model: ChessNet, config: ChessConfig, device: torch.devi
 def run_self_play_session(config: ChessConfig):
     """Run one self-play session: play games -> train -> gate."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = (config.training.mixed_precision == "fp16") and torch.cuda.is_available()
 
     model = ChessNet(config.model).to(device)
     latest_path = find_latest_checkpoint(config.paths.checkpoint_dir)
@@ -107,7 +108,7 @@ def run_self_play_session(config: ChessConfig):
         raise FileNotFoundError("No checkpoint found -- train Phase 1 first!")
 
     optimizer = optim.AdamW(model.parameters(), lr=config.training.learning_rate * 0.05)
-    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     replay_buffer = ReplayBuffer(config.self_play.replay_buffer_size)
 
@@ -179,7 +180,7 @@ def run_self_play_session(config: ChessConfig):
         y_value = batch["y_value"].to(device, non_blocking=True)
         legal_masks = batch["legal_mask"].to(device, non_blocking=True)
 
-        with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
+        with torch.amp.autocast('cuda', enabled=use_amp):
             policy_logits, value_pred = model(X)
             loss = combined_loss(policy_logits, y_policy, value_pred, y_value, legal_masks, config.training)
 

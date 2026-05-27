@@ -29,6 +29,8 @@ def train_supervised(config: ChessConfig, resume: bool = True):
     """Run supervised training."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    use_amp = (config.training.mixed_precision == "fp16") and torch.cuda.is_available()
+    logger.info(f"Mixed precision (FP16): {use_amp}")
 
     model = ChessNet(config.model).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -46,7 +48,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
         eta_min=config.training.min_learning_rate,
     )
 
-    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     dataset = ChessPositionDataset(config.paths.supervised_data_path)
     logger.info(f"Dataset: {dataset.num_positions:,} total positions available")
@@ -101,7 +103,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
             y_value = batch["y_value"].to(device, non_blocking=True)
             legal_masks = batch["legal_mask"].to(device, non_blocking=True)
 
-            with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
+            with torch.amp.autocast('cuda', enabled=use_amp):
                 policy_logits, value_pred = model(X)
                 loss = combined_loss(
                     policy_logits, y_policy, value_pred, y_value,

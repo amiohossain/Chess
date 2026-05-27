@@ -24,6 +24,8 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
     """Fine-tune the model on trap positions."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    use_amp = (config.training.mixed_precision == "fp16") and torch.cuda.is_available()
+    logger.info(f"Mixed precision (FP16): {use_amp}")
 
     model = ChessNet(config.model).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -41,7 +43,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
         lr=config.training.learning_rate * 0.1,
         weight_decay=config.training.weight_decay,
     )
-    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     general_dataset = ChessPositionDataset(config.paths.supervised_data_path, max_samples=500_000)
     trap_dataset = TrapDataset(config.paths.trap_data_path)
@@ -92,7 +94,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 torch.ones(len(trap_batch["X"])) * config.training.trap_loss_weight,
             ]).to(device, non_blocking=True)
 
-            with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
+            with torch.amp.autocast('cuda', enabled=use_amp):
                 policy_logits, value_pred = model(X)
                 loss = combined_loss(
                     policy_logits, y_policy, value_pred, y_value,
