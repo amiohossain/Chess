@@ -31,7 +31,8 @@ def train_supervised(config: ChessConfig, resume: bool = True):
     logger.info(f"Using device: {device}")
 
     model = ChessNet(config.model).to(device)
-    logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    n_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Model parameters: {n_params:,}")
 
     optimizer = optim.AdamW(
         model.parameters(),
@@ -48,6 +49,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
     scaler = GradScaler(enabled=(config.training.mixed_precision == "fp16"))
 
     dataset = ChessPositionDataset(config.paths.supervised_data_path)
+    logger.info(f"Dataset: {dataset.num_positions:,} total positions available")
     epoch_dataset = RandomSliceDataset(dataset, config.training.max_position_per_epoch)
     dataloader = DataLoader(
         epoch_dataset,
@@ -56,6 +58,15 @@ def train_supervised(config: ChessConfig, resume: bool = True):
         num_workers=config.training.num_workers,
         pin_memory=True,
         drop_last=True,
+    )
+
+    batch_size = config.training.batch_size
+    positions_per_epoch = config.training.max_position_per_epoch
+    batches_per_epoch = positions_per_epoch // batch_size
+    logger.info(
+        f"DataLoader: batch_size={batch_size}, "
+        f"batches_per_epoch={batches_per_epoch:,} "
+        f"(~{positions_per_epoch:,} positions/epoch)"
     )
 
     start_step = 0
@@ -73,6 +84,9 @@ def train_supervised(config: ChessConfig, resume: bool = True):
 
     model.train()
     global_step = start_step
+    log_interval = 500
+    accum_time = 0.0
+    accum_batches = 0
 
     for epoch in range(start_epoch, 1000):
         epoch_loss = 0.0
@@ -80,7 +94,9 @@ def train_supervised(config: ChessConfig, resume: bool = True):
         batch_count = 0
         epoch_start = time.time()
 
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
+            iter_start = time.time()
+
             X = batch["X"].to(device, non_blocking=True)
             y_policy = batch["y_policy"].to(device, non_blocking=True)
             y_value = batch["y_value"].to(device, non_blocking=True)
@@ -108,6 +124,30 @@ def train_supervised(config: ChessConfig, resume: bool = True):
                 pred_moves = policy_logits.argmax(dim=-1)
                 epoch_policy_acc += (pred_moves == y_policy).float().mean().item()
             batch_count += 1
+            accum_batches += 1
+
+            iter_time = time.time() - iter_start
+            accum_time += iter_time
+
+            # --- periodic progress log ---
+            if global_step % log_interval == 0:
+                pct = 100.0 * (batch_idx + 1) / batches_per_epoch
+                current_lr = scheduler.get_last_lr()[0]
+                avg_loss = epoch_loss / max(batch_count, 1)
+                avg_acc = epoch_policy_acc / max(batch_count, 1)
+                samples_sec = accum_batches * batch_size / max(accum_time, 1e-6)
+                elapsed = time.time() - epoch_start
+                eta_sec = (elapsed / (batch_idx + 1)) * (batches_per_epoch - batch_idx - 1)
+                logger.info(
+                    f"Epoch {epoch} | step {global_step:,} | "
+                    f"{pct:.1f}% ({batch_idx+1:,}/{batches_per_epoch:,}) | "
+                    f"loss={avg_loss:.4f} | acc={avg_acc:.4f} | "
+                    f"lr={current_lr:.2e} | "
+                    f"{samples_sec:.0f} pos/s | "
+                    f"ETA {eta_sec/60:.0f}min"
+                )
+                accum_time = 0.0
+                accum_batches = 0
 
             if global_step % config.training.checkpoint_every_n_steps == 0:
                 avg_loss = epoch_loss / max(batch_count, 1)
@@ -116,19 +156,20 @@ def train_supervised(config: ChessConfig, resume: bool = True):
                     step=global_step, epoch=epoch, loss=avg_loss,
                     tag=f"step_{global_step}",
                 )
-                logger.info(f"Checkpoint saved at step {global_step}, loss={avg_loss:.4f}")
+                logger.info(f">>> Checkpoint saved at step {global_step}, loss={avg_loss:.4f}")
 
         epoch_time = time.time() - epoch_start
         avg_loss = epoch_loss / max(batch_count, 1)
         avg_acc = epoch_policy_acc / max(batch_count, 1)
         logger.info(
-            f"Epoch {epoch} | step {global_step} | "
+            f"=== Epoch {epoch} complete | step {global_step:,} | "
             f"loss={avg_loss:.4f} | policy_acc={avg_acc:.4f} | "
-            f"time={epoch_time:.1f}s"
+            f"time={epoch_time:.1f}s ({epoch_time/60:.1f}min) ==="
         )
 
         if avg_loss < best_loss:
             best_loss = avg_loss
             save_checkpoint(model, optimizer, scheduler, step=global_step, epoch=epoch, loss=avg_loss, tag="best")
+            logger.info(f">>> Best checkpoint saved (loss={avg_loss:.4f})")
 
-    logger.info("Training complete.")
+    logger.info("=== Supervised training complete! ===")

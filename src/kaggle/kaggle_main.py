@@ -30,14 +30,22 @@ def detect_phase(config: ChessConfig) -> str:
     """Determine which phase to run based on available checkpoints."""
     latest = find_latest_checkpoint(config.paths.checkpoint_dir)
     if not latest:
+        logger.info("No checkpoints found — starting Phase 1 (supervised)")
         return "supervised"
     checkpoint = torch.load(latest, map_location="cpu", weights_only=True)
     tag = checkpoint.get("tag", "")
+    step = checkpoint.get("step", 0)
+    epoch = checkpoint.get("epoch", 0)
+    loss = checkpoint.get("loss", "?")
+    logger.info(f"Latest checkpoint: {latest} (tag={tag}, step={step}, epoch={epoch}, loss={loss})")
     if "trap" in tag:
+        logger.info("Trap checkpoint found → Phase 3 (self-play)")
         return "self_play"
     elif "self_play" in tag:
+        logger.info("Self-play checkpoint found → Phase 3 (self-play, continued)")
         return "self_play"
     else:
+        logger.info("Supervised checkpoint found → Phase 2 (trap finetune)")
         return "trap"
 
 

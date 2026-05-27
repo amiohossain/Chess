@@ -3,6 +3,7 @@
 Trains ChessNet on a 1:1 mix of trap positions and general chess positions.
 Trap positions are priority-weighted for sampling and have 2x loss weight.
 """
+import time
 import logging
 import torch
 import torch.optim as optim
@@ -25,6 +26,8 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
     logger.info(f"Using device: {device}")
 
     model = ChessNet(config.model).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Model parameters: {n_params:,}")
 
     latest_path = find_latest_checkpoint(config.paths.checkpoint_dir)
     if latest_path:
@@ -42,10 +45,15 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
 
     general_dataset = ChessPositionDataset(config.paths.supervised_data_path, max_samples=500_000)
     trap_dataset = TrapDataset(config.paths.trap_data_path)
+    trap_sample_count = min(len(trap_dataset), 200_000)
+    logger.info(
+        f"General dataset: {len(general_dataset):,} positions | "
+        f"Trap dataset: {len(trap_dataset):,} positions (sampling {trap_sample_count:,}/epoch)"
+    )
 
     trap_sampler = WeightedRandomSampler(
         weights=trap_dataset.sampling_weights,
-        num_samples=min(len(trap_dataset), 200_000),
+        num_samples=trap_sample_count,
         replacement=True,
     )
 
@@ -60,13 +68,17 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
 
     model.train()
     global_step = 0
+    log_interval = 200
 
     for epoch in range(10):
         epoch_loss = 0.0
         trap_acc = 0.0
         batch_count = 0
+        epoch_start = time.time()
 
-        for gen_batch, trap_batch in zip(general_loader, trap_loader):
+        for batch_idx, (gen_batch, trap_batch) in enumerate(zip(general_loader, trap_loader)):
+            iter_start = time.time()
+
             X = torch.cat([gen_batch["X"], trap_batch["X"]]).to(device, non_blocking=True)
             y_policy = torch.cat([gen_batch["y_policy"], trap_batch["y_policy"]]).to(device, non_blocking=True)
             y_value = torch.cat([gen_batch["y_value"], trap_batch["y_value"]]).to(device, non_blocking=True)
@@ -100,13 +112,31 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 trap_acc += (trap_pred == trap_target).float().mean().item()
             batch_count += 1
 
-            if global_step % 1000 == 0:
+            if global_step % log_interval == 0:
+                elapsed = time.time() - epoch_start
+                avg_loss = epoch_loss / max(batch_count, 1)
+                avg_trap_acc = trap_acc / max(batch_count, 1)
+                batches_sec = batch_count / max(elapsed, 1e-6)
                 logger.info(
-                    f"Trap step {global_step} | loss={epoch_loss/max(batch_count,1):.4f} | "
-                    f"trap_acc={trap_acc/max(batch_count,1):.4f}"
+                    f"Trap Epoch {epoch} | step {global_step:,} | "
+                    f"batch {batch_count:,} | "
+                    f"loss={avg_loss:.4f} | trap_acc={avg_trap_acc:.4f} | "
+                    f"{batches_sec:.1f} batch/s | "
+                    f"elapsed {elapsed/60:.1f}min"
                 )
 
+            if global_step % 1000 == 0:
+                avg_loss = epoch_loss / max(batch_count, 1)
+                save_checkpoint(model, optimizer, step=global_step, epoch=epoch, loss=avg_loss, tag=f"trap_step_{global_step}")
+                logger.info(f">>> Trap checkpoint saved at step {global_step}")
+
+        epoch_time = time.time() - epoch_start
         avg_loss = epoch_loss / max(batch_count, 1)
         avg_trap_acc = trap_acc / max(batch_count, 1)
-        logger.info(f"Trap Epoch {epoch} | loss={avg_loss:.4f} | trap_acc={avg_trap_acc:.4f}")
+        logger.info(
+            f"=== Trap Epoch {epoch} complete | step {global_step:,} | "
+            f"loss={avg_loss:.4f} | trap_acc={avg_trap_acc:.4f} | "
+            f"time={epoch_time:.1f}s ({epoch_time/60:.1f}min) ==="
+        )
         save_checkpoint(model, optimizer, step=global_step, epoch=epoch, loss=avg_loss, tag="trap_phase")
+        logger.info(f">>> Trap epoch checkpoint saved (tag=trap_phase)")

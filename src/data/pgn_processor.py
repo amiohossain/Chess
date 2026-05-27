@@ -11,12 +11,23 @@ Output: HDF5 file with datasets:
   - y_value: (N,) float32 — game outcome
 """
 import os
+import time
 import numpy as np
 import h5py
 import chess
 import chess.pgn
 from tqdm import tqdm
 from src.model.feature_encoder import encode_board, encode_move
+
+
+def count_pgn_games(pgn_path: str) -> int:
+    """Quick scan of a PGN to count total games (for progress bar)."""
+    count = 0
+    with open(pgn_path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if line.startswith("[Event "):
+                count += 1
+    return count
 
 
 def process_pgn(
@@ -40,12 +51,24 @@ def process_pgn(
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+    pgn_size_mb = os.path.getsize(pgn_path) / 1e6
+    print(f"PGN file: {pgn_size_mb:.0f} MB")
+    print("Scanning PGN to count games...")
+    total_games = count_pgn_games(pgn_path)
+    print(f"Total games in PGN: {total_games:,}")
+    if max_games:
+        print(f"Limiting to {max_games:,} games")
+
     X = np.zeros((max_positions, 119, 8, 8), dtype=np.float32)
     y_policy = np.zeros(max_positions, dtype=np.int32)
     y_value = np.zeros(max_positions, dtype=np.float32)
 
     count = 0
     game_count = 0
+    skipped_elo = 0
+    skipped_result = 0
+    start_time = time.time()
+    last_report = time.time()
 
     with open(pgn_path, encoding="utf-8", errors="ignore") as f:
         while True:
@@ -65,15 +88,19 @@ def process_pgn(
                     avg_elo = 0
                 if avg_elo < min_elo:
                     game_count += 1
+                    skipped_elo += 1
                     continue
 
             # Determine game outcome
             result = game.headers.get("Result", "*")
             outcome_map = {"1-0": 1.0, "0-1": -1.0, "1/2-1/2": 0.0}
             outcome = outcome_map.get(result, 0.0)
+            if outcome == 0.0 and result != "1/2-1/2":
+                skipped_result += 1
 
             # Play through the game
             board = game.board()
+            positions_this_game = 0
             for move in game.mainline_moves():
                 if count >= max_positions:
                     break
@@ -84,17 +111,46 @@ def process_pgn(
 
                 board.push(move)
                 count += 1
+                positions_this_game += 1
 
             game_count += 1
+
+            # Periodic progress report
+            if game_count % 1000 == 0:
+                elapsed = time.time() - start_time
+                rate = count / elapsed if elapsed > 0 else 0
+                pct = 100.0 * count / max_positions
+                print(
+                    f"  [{time.strftime('%H:%M:%S')}] Game {game_count:,} | "
+                    f"{count:,}/{max_positions:,} positions ({pct:.1f}%) | "
+                    f"{rate:.0f} pos/s | "
+                    f"skipped: {skipped_elo} (elo) {skipped_result} (result)"
+                )
+
             if count >= max_positions:
                 break
 
+    elapsed = time.time() - start_time
+    print(f"\nPGN processing complete:")
+    print(f"  Games processed: {game_count:,}")
+    print(f"  Positions extracted: {count:,}")
+    print(f"  Games skipped (elo): {skipped_elo:,}")
+    print(f"  Games skipped (result): {skipped_result:,}")
+    print(f"  Time: {elapsed:.1f}s ({elapsed/60:.1f}min)")
+    print(f"  Speed: {count/elapsed:.0f} pos/s")
+
     # Trim and write HDF5
+    print(f"\nWriting HDF5 to {output_path}...")
+    write_start = time.time()
     with h5py.File(output_path, "w") as f:
         f.create_dataset("X", data=X[:count], compression="lzf", chunks=True)
         f.create_dataset("y_policy", data=y_policy[:count], compression="lzf", chunks=True)
         f.create_dataset("y_value", data=y_value[:count], compression="lzf", chunks=True)
         f.attrs["num_positions"] = count
+    write_time = time.time() - write_start
+    print(f"HDF5 written: {count:,} positions in {write_time:.1f}s")
+    write_size_mb = os.path.getsize(output_path) / 1e6
+    print(f"HDF5 file size: {write_size_mb:.0f} MB")
 
     return count
 

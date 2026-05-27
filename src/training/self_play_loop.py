@@ -55,7 +55,7 @@ class ReplayBuffer(Dataset):
         }
 
 
-def play_self_play_game(model: ChessNet, config: ChessConfig, device: torch.device) -> list:
+def play_self_play_game(model: ChessNet, config: ChessConfig, device: torch.device, game_num: int = 0) -> list:
     """Play a single self-play game. Returns list of (X, y_policy, y_value)."""
     board = chess.Board()
     positions = []
@@ -77,16 +77,21 @@ def play_self_play_game(model: ChessNet, config: ChessConfig, device: torch.devi
             temp = 0.5
 
     if board.is_checkmate():
+        # White played last if moves_played is odd, black if even
+        winner = "W" if (moves_played % 2 == 1) else "B"
         outcome = 1.0 if (moves_played % 2 == 1) else -1.0
+        result_str = f"1-0 ({winner} by checkmate)"
     elif board.is_game_over():
         outcome = 0.0
+        result_str = "½-½ (draw)"
     else:
         outcome = 0.0
+        result_str = "½-½ (truncated)"
 
     for pos in positions:
         pos["y_value"] = outcome
 
-    return positions
+    return positions, result_str, moves_played
 
 
 def run_self_play_session(config: ChessConfig):
@@ -106,14 +111,51 @@ def run_self_play_session(config: ChessConfig):
 
     replay_buffer = ReplayBuffer(config.self_play.replay_buffer_size)
 
-    logger.info(f"Playing {config.self_play.games_per_session} self-play games...")
-    for game_idx in range(config.self_play.games_per_session):
-        positions = play_self_play_game(model, config, device)
-        replay_buffer.add(positions)
-        if (game_idx + 1) % 50 == 0:
-            logger.info(f"  Played {game_idx + 1}/{config.self_play.games_per_session} games ({replay_buffer.size} positions)")
+    n_games = config.self_play.games_per_session
+    session_start = time.time()
+    game_results = {"W": 0, "B": 0, "draw": 0, "trunc": 0}
+    total_moves = 0
+    total_positions = 0
 
-    logger.info(f"Replay buffer: {replay_buffer.size} positions. Training...")
+    logger.info(f"{'='*60}")
+    logger.info(f"SELF-PLAY: {n_games} games")
+    logger.info(f"{'='*60}")
+
+    for game_idx in range(n_games):
+        positions, result_str, moves = play_self_play_game(model, config, device, game_num=game_idx + 1)
+        replay_buffer.add(positions)
+        total_moves += moves
+        total_positions += len(positions)
+
+        if "1-0" in result_str:
+            game_results["W"] += 1
+        elif "0-1" in result_str:
+            game_results["B"] += 1
+        elif "draw" in result_str:
+            game_results["draw"] += 1
+        else:
+            game_results["trunc"] += 1
+
+        logger.info(
+            f"[{game_idx+1:>4}/{n_games}] {result_str} | "
+            f"{moves:>3} ply | "
+            f"{len(positions):>4} positions | "
+            f"W:{game_results['W']} B:{game_results['B']} "
+            f"D:{game_results['draw']} T:{game_results['trunc']}"
+        )
+
+    elapsed = time.time() - session_start
+    total = game_results["W"] + game_results["B"] + game_results["draw"] + game_results["trunc"]
+    logger.info(f"{'='*60}")
+    logger.info(f"SELF-PLAY COMPLETE: {total} games in {elapsed/60:.1f}min")
+    logger.info(f"  Results: W={game_results['W']} B={game_results['B']} "
+                f"Draw={game_results['draw']} Trunc={game_results['trunc']}")
+    logger.info(f"  Avg ply/game: {total_moves/max(total,1):.1f}")
+    logger.info(f"  Avg positions/game: {total_positions/max(total,1):.0f}")
+    logger.info(f"  Total positions in replay buffer: {replay_buffer.size}")
+    logger.info(f"{'='*60}")
+
+    logger.info(f"Training on replay buffer ({replay_buffer.size} positions)...")
     model.train()
 
     dataloader = DataLoader(
@@ -121,7 +163,11 @@ def run_self_play_session(config: ChessConfig):
         shuffle=True, num_workers=0, pin_memory=True,
     )
 
-    for batch in dataloader:
+    n_batches = len(dataloader)
+    train_loss = 0.0
+    train_start = time.time()
+
+    for batch_idx, batch in enumerate(dataloader):
         X = batch["X"].to(device, non_blocking=True)
         y_policy = batch["y_policy"].to(device, non_blocking=True)
         y_value = batch["y_value"].to(device, non_blocking=True)
@@ -138,5 +184,20 @@ def run_self_play_session(config: ChessConfig):
         scaler.update()
         optimizer.zero_grad()
 
-    save_checkpoint(model, optimizer, step=0, epoch=0, loss=0.0, tag=f"self_play_{int(time.time())}")
-    logger.info("Self-play session complete. Checkpoint saved.")
+        train_loss += loss.item()
+
+        if (batch_idx + 1) % 100 == 0:
+            pct = 100.0 * (batch_idx + 1) / n_batches
+            batch_elapsed = time.time() - train_start
+            logger.info(
+                f"  Train batch {batch_idx+1:,}/{n_batches:,} ({pct:.0f}%) | "
+                f"loss={loss.item():.4f} | "
+                f"elapsed {batch_elapsed/60:.1f}min"
+            )
+
+    train_time = time.time() - train_start
+    avg_loss = train_loss / max(n_batches, 1)
+    logger.info(f"Training complete: {n_batches} batches in {train_time:.1f}s, avg loss={avg_loss:.4f}")
+
+    save_checkpoint(model, optimizer, step=0, epoch=0, loss=avg_loss, tag=f"self_play_{int(time.time())}")
+    logger.info(">>> Self-play checkpoint saved")
