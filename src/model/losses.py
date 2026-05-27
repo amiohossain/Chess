@@ -1,8 +1,11 @@
 """Loss functions for chess model training.
 
-Combined loss = 0.5 * policy_ce + 0.3 * value_mse + 0.2 * top10_accuracy_reg
+Combined loss = 0.5 * policy_ce + 0.3 * value_mse + 0.2 * top10_margin
 
 Trap training additionally applies trap_loss_weight on trap position batches.
+
+top10_margin is a margin-based penalty (bounded >= 0): it penalizes top-10
+distractor moves whose logit exceeds the target move's logit.
 """
 import torch
 import torch.nn.functional as F
@@ -39,9 +42,11 @@ def combined_loss(
     # Value loss: MSE
     value_loss = F.mse_loss(value_pred.squeeze(-1), value_targets.squeeze(-1), reduction='none')
 
-    # Top-10 accuracy regularizer: penalizes non-target moves in the top 10
+    # Top-10 accuracy regularizer: penalize distractors that beat the target
+    # Bounded below by 0 — no more diverging loss
     top10_mask = _top10_mask(masked_logits, policy_targets)
-    top10_reg = (masked_logits * top10_mask).sum(dim=1).mean()
+    target_logit = masked_logits.gather(1, policy_targets.unsqueeze(1))
+    top10_reg = F.relu(masked_logits - target_logit).mul(top10_mask).sum(dim=1).mean()
 
     # Combine
     loss = (
@@ -59,12 +64,11 @@ def combined_loss(
 
 
 def _top10_mask(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    """Create a mask encouraging correct move to be in the top 10 logits.
+    """Create a mask selecting non-target top-10 moves for margin penalty.
 
     Returns a mask with +1 for non-target top-10 moves, 0 elsewhere.
-    masked_logits * mask then gives the sum of logits of top-10 distractors,
-    which the optimizer will push down (the correct move should dominate
-    the top-10 instead of the other 9 candidates).
+    Used with F.relu(logits - target_logit) so only distractors that beat
+    the target contribute loss — bounded below by 0.
     """
     batch_size = logits.size(0)
     mask = torch.zeros_like(logits)
