@@ -39,10 +39,9 @@ def combined_loss(
     # Value loss: MSE
     value_loss = F.mse_loss(value_pred.squeeze(-1), value_targets.squeeze(-1), reduction='none')
 
-    # Top-10 accuracy regularizer: encourages high probability on the correct top-10
+    # Top-10 accuracy regularizer: penalizes non-target moves in the top 10
     top10_mask = _top10_mask(masked_logits, policy_targets)
-    top10_reg = (masked_logits * top10_mask).sum(dim=1) - masked_logits.gather(1, policy_targets.unsqueeze(1)).squeeze(1)
-    top10_reg = top10_reg.mean()
+    top10_reg = (masked_logits * top10_mask).sum(dim=1).mean()
 
     # Combine
     loss = (
@@ -60,7 +59,13 @@ def combined_loss(
 
 
 def _top10_mask(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    """Create a mask encouraging correct move to be in the top 10 logits."""
+    """Create a mask encouraging correct move to be in the top 10 logits.
+
+    Returns a mask with +1 for non-target top-10 moves, 0 elsewhere.
+    masked_logits * mask then gives the sum of logits of top-10 distractors,
+    which the optimizer will push down (the correct move should dominate
+    the top-10 instead of the other 9 candidates).
+    """
     batch_size = logits.size(0)
     mask = torch.zeros_like(logits)
 
@@ -68,7 +73,7 @@ def _top10_mask(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         top10_indices = logits[i].topk(10).indices
         for idx in top10_indices:
             if idx != targets[i]:
-                mask[i, idx] = -1.0
-        mask[i, targets[i]] = 1.0
+                mask[i, idx] = 1.0
+        # target gets 0 — we penalize the crowd around it, not the target itself
 
     return mask
