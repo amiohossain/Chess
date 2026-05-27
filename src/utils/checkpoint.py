@@ -73,7 +73,12 @@ def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
 
     def _sync():
         try:
-            subprocess.run(["git", "add", os.path.join(save_dir, "*.pt")], capture_output=True)
+            # Only sync checkpoint_best.pt — skip periodic full checkpoints to save LFS storage
+            best_path = os.path.join(save_dir, "checkpoint_best.pt")
+            if not os.path.exists(best_path):
+                _git_sync_lock.release()
+                return
+            subprocess.run(["git", "add", best_path], capture_output=True)
             subprocess.run(
                 ["git", "commit", "-m", f"checkpoint step {step}"],
                 capture_output=True,
