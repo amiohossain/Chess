@@ -45,6 +45,18 @@ def init_lfs_and_auth(token: str = None) -> None:
                 _git_token = token.strip()
         except Exception:
             pass
+    if not _git_token:
+        # Last resort: read from kaggle_token.txt (gitignored, local-only)
+        for path in [os.path.join(os.getcwd(), "kaggle_token.txt"), "kaggle_token.txt"]:
+            try:
+                with open(path) as f:
+                    token = f.read().strip()
+                    if token:
+                        _git_token = token
+                        logger.info("Git token loaded from kaggle_token.txt")
+                        break
+            except Exception:
+                continue
         if _git_token:
             logger.info(f"Git token loaded from env ({len(_git_token)} chars)")
 

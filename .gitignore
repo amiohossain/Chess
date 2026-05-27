@@ -1,0 +1,19 @@
+# Local token file — create on Kaggle, never committed
+kaggle_token.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
