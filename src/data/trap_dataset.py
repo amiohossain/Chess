@@ -6,8 +6,11 @@ Each trap position is labeled with:
   - Priority: computed from improvement score * theme_weight
 """
 import json
+import logging
 import h5py
 import numpy as np
+
+logger = logging.getLogger(__name__)
 import torch
 from torch.utils.data import Dataset
 
