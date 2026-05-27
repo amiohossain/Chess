@@ -7,8 +7,32 @@ Supports:
 """
 import os
 import glob
+import time
 import torch
 from src.config import PathConfig
+
+
+def save_latest_weights(
+    model: torch.nn.Module,
+    step: int,
+    loss: float,
+    save_dir: str = "./checkpoints",
+) -> str:
+    """Quick save of model weights + step number only (no optimizer/scheduler).
+
+    Lightweight per-step checkpoint so crashes lose at most 1 step.
+    Overwrites ``checkpoint_latest.pt`` each call — only one file on disk.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, "checkpoint_latest.pt")
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "step": step,
+        "loss": loss,
+        "tag": "latest",
+        "saved_at": time.time(),
+    }, path)
+    return path
 
 
 def save_checkpoint(

@@ -23,7 +23,7 @@ from src.model.feature_encoder import encode_board, encode_move
 from src.model.losses import combined_loss
 from src.search.mcts import MCTS
 from src.inference.move_selector import select_move
-from src.utils.checkpoint import save_checkpoint, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_latest_weights, load_checkpoint, find_latest_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +192,9 @@ def run_self_play_session(config: ChessConfig):
 
         train_loss += loss.item()
         self_play_step += 1
+
+        # Save weights every step — crash-safe resume
+        save_latest_weights(model, self_play_step, loss.item(), config.paths.checkpoint_dir)
 
         # Per-step log
         logger.info(
