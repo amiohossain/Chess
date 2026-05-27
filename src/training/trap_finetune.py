@@ -45,6 +45,8 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
     )
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
+    logger.info(f"General training data file: {config.paths.supervised_data_path}")
+    logger.info(f"Trap training data file: {config.paths.trap_data_path}")
     general_dataset = ChessPositionDataset(config.paths.supervised_data_path, max_samples=500_000)
     trap_dataset = TrapDataset(config.paths.trap_data_path)
     trap_sample_count = min(len(trap_dataset), 200_000)

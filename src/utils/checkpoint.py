@@ -76,15 +76,25 @@ def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
             # Only sync checkpoint_best.pt — skip periodic full checkpoints to save LFS storage
             best_path = os.path.join(save_dir, "checkpoint_best.pt")
             if not os.path.exists(best_path):
-                _git_sync_lock.release()
+                logger.warning(f"Git sync: {best_path} not found — nothing to sync")
                 return
-            subprocess.run(["git", "add", best_path], capture_output=True)
+
+            add = subprocess.run(["git", "add", best_path], capture_output=True, text=True)
+            if add.returncode != 0:
+                logger.warning(f"Git add failed: {add.stderr.strip()}")
+                return
+
             subprocess.run(
                 ["git", "commit", "-m", f"checkpoint step {step}"],
-                capture_output=True,
+                capture_output=True, text=True,
             )
-            subprocess.run(["git", "push", "origin", "main"], capture_output=True)
-            logger.info(f"Checkpoint synced to git at step {step}")
+
+            push = subprocess.run(["git", "push", "origin", "HEAD:checkpoints"], capture_output=True, text=True)
+            if push.returncode != 0:
+                logger.warning(f"Git push failed: {push.stderr.strip()}")
+                return
+
+            logger.info(f"Checkpoint synced to git (branch: checkpoints, step {step})")
         except Exception as e:
             logger.warning(f"Git sync failed at step {step}: {e}")
         finally:
@@ -164,10 +174,12 @@ def save_checkpoint(
 
     path = os.path.join(save_dir, f"checkpoint_{tag}.pt")
     torch.save(checkpoint, path)
+    logger.info(f"Saved checkpoint: {path}")
 
     if tag != "latest":
         latest_path = os.path.join(save_dir, "checkpoint_latest.pt")
         torch.save(checkpoint, latest_path)
+        logger.info(f"Saved latest mirror: {latest_path}")
 
     return path
 

@@ -49,6 +49,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
 
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
+    logger.info(f"Training data file: {config.paths.supervised_data_path}")
     dataset = ChessPositionDataset(config.paths.supervised_data_path)
     logger.info(f"Dataset: {dataset.num_positions:,} total positions available")
     epoch_dataset = RandomSliceDataset(dataset, config.training.max_position_per_epoch)

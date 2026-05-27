@@ -120,6 +120,7 @@ class TrapDataset(Dataset):
 
     def __init__(self, h5_path: str):
         self.h5_path = h5_path
+        logger.info(f"Opening trap dataset: {h5_path}")
         with h5py.File(h5_path, "r") as f:
             self.num_positions = f.attrs["num_positions"]
             self.priorities = f["priority"][:]

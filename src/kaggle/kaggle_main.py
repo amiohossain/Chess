@@ -53,11 +53,11 @@ def setup_kaggle_config() -> ChessConfig:
     """Create config with Kaggle-appropriate paths."""
     config = ChessConfig()
     config.paths = PathConfig(
-        checkpoint_dir="/kaggle/working/checkpoints",
+        checkpoint_dir="/kaggle/working/Chess/checkpoints",
         data_dir="/kaggle/input/chess-training-data-2013",
         trap_data_path="/kaggle/input/chess-data/trap_positions.h5",
-        supervised_data_path="/kaggle/working/supervised_positions.h5",
-        log_dir="/kaggle/working/logs",
+        supervised_data_path="/kaggle/working/Chess/supervised_positions.h5",
+        log_dir="/kaggle/working/Chess/logs",
     )
     config.training.num_workers = 2
     return config

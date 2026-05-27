@@ -29,6 +29,7 @@ class ChessPositionDataset(Dataset):
         self._y_value = None
 
         # Get metadata first
+        logger.info(f"Opening dataset: {h5_path}")
         with h5py.File(h5_path, "r") as f:
             self.num_positions = f.attrs["num_positions"]
             # Estimate size: X is (N, 119, 8, 8) float32

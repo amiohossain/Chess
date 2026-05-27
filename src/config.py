@@ -35,7 +35,7 @@ class TrainingConfig:
     value_weight: float = 0.3
     top10_reg_weight: float = 0.2
     gradient_clip_norm: float = 1.0
-    checkpoint_every_n_steps: int = 10_000
+    checkpoint_every_n_steps: int = 1_000
     mixed_precision: str = "fp16"
     cosine_decay_steps: int = 100_000
     trap_loss_weight: float = 2.0
