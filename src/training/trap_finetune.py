@@ -68,18 +68,20 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
 
     model.train()
     global_step = 0
-    log_interval = 200
+
+    if resume and latest_path:
+        state = load_checkpoint(latest_path, model, optimizer, device=device)
+        global_step = state.get("step", 0)
+        logger.info(f"Resumed trap phase at step {global_step:,}")
 
     for epoch in range(10):
-        logger.info(f"--- Trap epoch {epoch} ---")
+        logger.info(f"--- Trap epoch {epoch} (starting at step {global_step:,}) ---")
         epoch_loss = 0.0
         trap_acc = 0.0
         batch_count = 0
         epoch_start = time.time()
 
         for batch_idx, (gen_batch, trap_batch) in enumerate(zip(general_loader, trap_loader)):
-            iter_start = time.time()
-
             X = torch.cat([gen_batch["X"], trap_batch["X"]]).to(device, non_blocking=True)
             y_policy = torch.cat([gen_batch["y_policy"], trap_batch["y_policy"]]).to(device, non_blocking=True)
             y_value = torch.cat([gen_batch["y_value"], trap_batch["y_value"]]).to(device, non_blocking=True)
@@ -113,21 +115,25 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 trap_acc += (trap_pred == trap_target).float().mean().item()
             batch_count += 1
 
-            if global_step % log_interval == 0:
+            # Per-step log
+            logger.info(
+                f"trap step {global_step:>6} | "
+                f"loss={loss.item():.4f} | "
+                f"trap_acc={(trap_pred == trap_target).float().mean().item():.4f}"
+            )
+
+            # Detailed stats every 1000 steps
+            if global_step % 1000 == 0:
                 elapsed = time.time() - epoch_start
+                batches_sec = batch_count / max(elapsed, 1e-6)
                 avg_loss = epoch_loss / max(batch_count, 1)
                 avg_trap_acc = trap_acc / max(batch_count, 1)
-                batches_sec = batch_count / max(elapsed, 1e-6)
                 logger.info(
-                    f"Trap Epoch {epoch} | step {global_step:,} | "
-                    f"batch {batch_count:,} | "
+                    f"--- TRAP PROGRESS: Epoch {epoch} | step {global_step:,} | "
                     f"loss={avg_loss:.4f} | trap_acc={avg_trap_acc:.4f} | "
                     f"{batches_sec:.1f} batch/s | "
-                    f"elapsed {elapsed/60:.1f}min"
+                    f"elapsed {elapsed/60:.1f}min ---"
                 )
-
-            if global_step % 1000 == 0:
-                avg_loss = epoch_loss / max(batch_count, 1)
                 save_checkpoint(model, optimizer, step=global_step, epoch=epoch, loss=avg_loss, tag=f"trap_step_{global_step}")
                 logger.info(f">>> Trap checkpoint saved at step {global_step}")
 

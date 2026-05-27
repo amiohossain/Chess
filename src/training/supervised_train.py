@@ -84,9 +84,6 @@ def train_supervised(config: ChessConfig, resume: bool = True):
 
     model.train()
     global_step = start_step
-    log_interval = 100
-    accum_time = 0.0
-    accum_batches = 0
 
     for epoch in range(start_epoch, 1000):
         logger.info(f"--- Starting epoch {epoch} at global_step {global_step:,} ---")
@@ -94,6 +91,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
         epoch_policy_acc = 0.0
         batch_count = 0
         epoch_start = time.time()
+        accum_time = 0.0
 
         for batch_idx, batch in enumerate(dataloader):
             iter_start = time.time()
@@ -125,30 +123,30 @@ def train_supervised(config: ChessConfig, resume: bool = True):
                 pred_moves = policy_logits.argmax(dim=-1)
                 epoch_policy_acc += (pred_moves == y_policy).float().mean().item()
             batch_count += 1
-            accum_batches += 1
-
             iter_time = time.time() - iter_start
             accum_time += iter_time
 
-            # --- periodic progress log ---
-            if global_step % log_interval == 0:
+            # Per-step log: concise, always visible
+            logger.info(
+                f"step {global_step:>6} | "
+                f"loss={loss.item():.4f} | "
+                f"acc={epoch_policy_acc/max(batch_count,1):.4f} | "
+                f"lr={scheduler.get_last_lr()[0]:.2e}"
+            )
+
+            # Detailed stats every 1000 steps
+            if global_step % 1000 == 0:
                 pct = 100.0 * (batch_idx + 1) / batches_per_epoch
-                current_lr = scheduler.get_last_lr()[0]
-                avg_loss = epoch_loss / max(batch_count, 1)
-                avg_acc = epoch_policy_acc / max(batch_count, 1)
-                samples_sec = accum_batches * batch_size / max(accum_time, 1e-6)
+                samples_sec = batch_count * batch_size / max(accum_time, 1e-6)
                 elapsed = time.time() - epoch_start
                 eta_sec = (elapsed / (batch_idx + 1)) * (batches_per_epoch - batch_idx - 1)
                 logger.info(
-                    f"Epoch {epoch} | step {global_step:,} | "
-                    f"{pct:.1f}% ({batch_idx+1:,}/{batches_per_epoch:,}) | "
-                    f"loss={avg_loss:.4f} | acc={avg_acc:.4f} | "
-                    f"lr={current_lr:.2e} | "
+                    f"--- PROGRESS: Epoch {epoch} | step {global_step:,} | "
+                    f"{pct:.1f}% | "
                     f"{samples_sec:.0f} pos/s | "
-                    f"ETA {eta_sec/60:.0f}min"
+                    f"elapsed {elapsed/60:.1f}min | "
+                    f"ETA {eta_sec/60:.0f}min ---"
                 )
-                accum_time = 0.0
-                accum_batches = 0
 
             if global_step % config.training.checkpoint_every_n_steps == 0:
                 avg_loss = epoch_loss / max(batch_count, 1)

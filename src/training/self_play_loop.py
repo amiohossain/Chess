@@ -166,6 +166,12 @@ def run_self_play_session(config: ChessConfig):
     n_batches = len(dataloader)
     train_loss = 0.0
     train_start = time.time()
+    self_play_step = 0
+
+    # Resume step count from checkpoint if available
+    if latest_path:
+        state = load_checkpoint(latest_path, model, optimizer, device=device)
+        self_play_step = state.get("step", 0)
 
     for batch_idx, batch in enumerate(dataloader):
         X = batch["X"].to(device, non_blocking=True)
@@ -185,19 +191,29 @@ def run_self_play_session(config: ChessConfig):
         optimizer.zero_grad()
 
         train_loss += loss.item()
+        self_play_step += 1
 
-        if (batch_idx + 1) % 100 == 0:
+        # Per-step log
+        logger.info(
+            f"sp train step {self_play_step:>6} | "
+            f"batch {batch_idx+1}/{n_batches} | "
+            f"loss={loss.item():.4f}"
+        )
+
+        # Detailed stats every 500 steps
+        if (batch_idx + 1) % 500 == 0:
             pct = 100.0 * (batch_idx + 1) / n_batches
             batch_elapsed = time.time() - train_start
             logger.info(
-                f"  Train batch {batch_idx+1:,}/{n_batches:,} ({pct:.0f}%) | "
-                f"loss={loss.item():.4f} | "
-                f"elapsed {batch_elapsed/60:.1f}min"
+                f"--- SP TRAIN PROGRESS: step {self_play_step:,} | "
+                f"{pct:.0f}% ({batch_idx+1:,}/{n_batches:,}) | "
+                f"avg_loss={train_loss/max(batch_idx+1,1):.4f} | "
+                f"elapsed {batch_elapsed/60:.1f}min ---"
             )
 
     train_time = time.time() - train_start
     avg_loss = train_loss / max(n_batches, 1)
     logger.info(f"Training complete: {n_batches} batches in {train_time:.1f}s, avg loss={avg_loss:.4f}")
 
-    save_checkpoint(model, optimizer, step=0, epoch=0, loss=avg_loss, tag=f"self_play_{int(time.time())}")
+    save_checkpoint(model, optimizer, step=self_play_step, epoch=0, loss=avg_loss, tag=f"self_play_{int(time.time())}")
     logger.info(">>> Self-play checkpoint saved")
