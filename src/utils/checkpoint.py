@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # -- git sync state --
 _git_sync_lock = threading.Lock()
+_git_token = None  # stored by init_lfs_and_auth, reused by sync_checkpoint_to_git
 
 
 def init_lfs_and_auth(token: str = None) -> None:
@@ -26,41 +27,62 @@ def init_lfs_and_auth(token: str = None) -> None:
 
     Call once at startup (e.g. in Kaggle notebook Cell 1) to restore
     previously-pushed checkpoints via ``git lfs checkout``.
+
+    Stores the token globally so sync_checkpoint_to_git can re-inject
+    auth into the remote URL if needed.
     """
+    global _git_token
+    if token:
+        _git_token = token
+    elif not _git_token:
+        _git_token = os.environ.get("GITHUB_TOKEN")
+
+    # Derive repo root: assume CWD is inside the repo (Cell 1 does %cd ...)
+    cwd = os.getcwd()
+
+    # Try to install LFS, but don't abort on failure — auth setup matters more
     try:
         subprocess.run(["git", "lfs", "install"], capture_output=True, check=True)
         logger.info("Git LFS installed")
     except Exception as e:
-        logger.warning(f"git lfs install failed: {e}")
-        return
+        logger.warning(f"git lfs install failed (non-fatal): {e}")
 
     # Configure git user (needed for commits)
     for cfg, val in [("user.email", "kaggle@chess.ai"), ("user.name", "Kaggle Trainer")]:
         subprocess.run(["git", "config", cfg, val], capture_output=True)
 
     # Inject token into remote URL for authenticated pushes
-    if token:
-        try:
-            result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                capture_output=True, text=True, check=True,
-            )
-            url = result.stdout.strip()
-            # Insert token into https:// URL
-            if url.startswith("https://") and "@" not in url:
-                authed_url = url.replace("https://", f"https://{token}@")
-                subprocess.run(["git", "remote", "set-url", "origin", authed_url], capture_output=True, check=True)
-                logger.info("Git remote configured with token auth")
-        except Exception as e:
-            logger.warning(f"Git remote setup failed: {e}")
+    _ensure_remote_auth(cwd)
 
     # Restore previously-pushed LFS objects
     try:
-        subprocess.run(["git", "lfs", "fetch"], capture_output=True, check=True)
-        subprocess.run(["git", "lfs", "checkout"], capture_output=True, check=True)
+        subprocess.run(["git", "lfs", "fetch"], capture_output=True, check=True, cwd=cwd)
+        subprocess.run(["git", "lfs", "checkout"], capture_output=True, check=True, cwd=cwd)
         logger.info("LFS objects restored from remote")
     except Exception as e:
         logger.warning(f"LFS restore failed (expected on first run): {e}")
+
+
+def _ensure_remote_auth(repo_root: str) -> None:
+    """Inject the stored token into the 'origin' remote URL if needed."""
+    global _git_token
+    if not _git_token:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=True, cwd=repo_root,
+        )
+        url = result.stdout.strip()
+        if url.startswith("https://") and "@" not in url:
+            authed_url = url.replace("https://", f"https://{_git_token}@")
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", authed_url],
+                capture_output=True, check=True, cwd=repo_root,
+            )
+            logger.info("Git remote configured with token auth")
+    except Exception as e:
+        logger.warning(f"Git remote auth setup failed: {e}")
 
 
 def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
@@ -93,6 +115,9 @@ def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
                 ["git", "commit", "-m", f"checkpoint step {step}"],
                 capture_output=True, text=True, cwd=repo_root,
             )
+
+            # Ensure remote URL has auth token before pushing
+            _ensure_remote_auth(repo_root)
 
             push = subprocess.run(
                 ["git", "push", "origin", "HEAD:checkpoints"],
