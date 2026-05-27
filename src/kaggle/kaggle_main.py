@@ -48,7 +48,7 @@ def setup_kaggle_config() -> ChessConfig:
         checkpoint_dir="/kaggle/working/checkpoints",
         data_dir="/kaggle/input/chess-training-data",
         trap_data_path="/kaggle/input/chess-data/trap_positions.h5",
-        supervised_data_path="/kaggle/input/chess-data/supervised_positions.h5",
+        supervised_data_path="/kaggle/working/supervised_positions.h5",
         log_dir="/kaggle/working/logs",
     )
     config.training.num_workers = 2
