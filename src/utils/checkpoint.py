@@ -28,30 +28,31 @@ def init_lfs_and_auth(token: str = None) -> None:
     Call once at startup (e.g. in Kaggle notebook Cell 1) to restore
     previously-pushed checkpoints via ``git lfs checkout``.
 
-    Stores the token globally so sync_checkpoint_to_git can re-inject
-    auth into the remote URL if needed.
+    Stores the token globally so sync_checkpoint_to_git reuses it.
     """
     global _git_token
     if token:
         _git_token = token
+        logger.info(f"Git token stored ({len(token)} chars)")
     elif not _git_token:
         _git_token = os.environ.get("GITHUB_TOKEN")
+        if _git_token:
+            logger.info(f"Git token loaded from env ({len(_git_token)} chars)")
 
-    # Derive repo root: assume CWD is inside the repo (Cell 1 does %cd ...)
+    # Derive repo root for git commands (assumes CWD is inside repo from Cell 1 %cd)
     cwd = os.getcwd()
 
-    # Try to install LFS, but don't abort on failure — auth setup matters more
+    # Install LFS hooks so git add recognizes LFS-tracked files
     try:
         subprocess.run(["git", "lfs", "install"], capture_output=True, check=True)
-        logger.info("Git LFS installed")
-    except Exception as e:
-        logger.warning(f"git lfs install failed (non-fatal): {e}")
+    except Exception:
+        pass  # non-fatal — add/push may still work
 
     # Configure git user (needed for commits)
     for cfg, val in [("user.email", "kaggle@chess.ai"), ("user.name", "Kaggle Trainer")]:
         subprocess.run(["git", "config", cfg, val], capture_output=True)
 
-    # Inject token into remote URL for authenticated pushes
+    # Inject token into remote URL as best-effort
     _ensure_remote_auth(cwd)
 
     # Restore previously-pushed LFS objects
@@ -85,6 +86,34 @@ def _ensure_remote_auth(repo_root: str) -> None:
         logger.warning(f"Git remote auth setup failed: {e}")
 
 
+def _build_push_url(repo_root: str):
+    """Return an authenticated push URL, or None if no token is available.
+
+    Uses the stored token to build ``https://<token>@github.com/...`` URL.
+    Falls back to ``origin`` if the token is empty (push will likely fail).
+    """
+    global _git_token
+    logger.info(f"_build_push_url: token={'set' if _git_token else 'not set'}")
+    if not _git_token:
+        # Try env as last resort
+        _git_token = os.environ.get("GITHUB_TOKEN")
+    if not _git_token:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=True, cwd=repo_root,
+        )
+        url = result.stdout.strip()
+        if url.startswith("https://"):
+            if "@" not in url:
+                url = url.replace("https://", f"https://{_git_token}@")
+            return url
+    except Exception:
+        pass
+    return "origin"
+
+
 def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
     """Push checkpoint files to Git LFS in a background thread.
 
@@ -116,11 +145,14 @@ def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
                 capture_output=True, text=True, cwd=repo_root,
             )
 
-            # Ensure remote URL has auth token before pushing
-            _ensure_remote_auth(repo_root)
+            # Build an authenticated push URL from the stored token
+            push_url = _build_push_url(repo_root)
+            if not push_url:
+                logger.warning("Git sync: no token available — skipping push")
+                return
 
             push = subprocess.run(
-                ["git", "push", "origin", "HEAD:checkpoints"],
+                ["git", "push", push_url, "HEAD:checkpoints"],
                 capture_output=True, text=True, cwd=repo_root,
             )
             if push.returncode != 0:
