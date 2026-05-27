@@ -3,72 +3,52 @@
 Supports:
   - Saving model, optimizer, scheduler state
   - Resuming from the latest checkpoint
-  - Cloud upload to Google Drive / Kaggle Dataset
+  - Best-loss checkpoint (only overwritten on improvement)
 """
 import os
 import glob
 import time
-import threading
 import torch
 from src.config import PathConfig
 
-# -- async per-step save state --
-_save_lock = threading.Lock()
-_save_thread = None
+
+def _best_loss_path(save_dir: str) -> str:
+    return os.path.join(save_dir, "checkpoint_best.pt")
 
 
-def save_latest_weights(
+def save_best_weights(
     model: torch.nn.Module,
     step: int,
     loss: float,
     save_dir: str = "./checkpoints",
-    sync: bool = False,
-) -> None:
-    """Save model weights + step number only (full checkpoint skipped).
+) -> bool:
+    """Save model weights only if *loss* is the lowest seen so far.
 
-    **Async** (default): copies state dict to CPU, spawns a daemon thread
-    to write to disk. If a previous async save is still in progress,
-    this call is dropped — we never queue writes.
-
-    **Sync** (``sync=True``): blocks until written. Use for the final save
-    before a checkpoint or when shutting down.
-
-    Only one file on disk (``checkpoint_latest.pt``), overwritten each call.
+    Returns True if a save was performed (i.e. loss is a new best), False otherwise.
+    Previous best checkpoint is silently overwritten — only one best file exists.
     """
+    best_path = _best_loss_path(save_dir)
+    prev_best = float("inf")
+
+    if os.path.exists(best_path):
+        prev = torch.load(best_path, map_location="cpu", weights_only=True)
+        prev_best = prev.get("loss", float("inf"))
+
+    if loss >= prev_best:
+        return False
+
+    os.makedirs(save_dir, exist_ok=True)
     state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-
-    def _write():
-        os.makedirs(save_dir, exist_ok=True)
-        path = os.path.join(save_dir, "checkpoint_latest.pt")
-        tmp = path + ".tmp"
-        torch.save({
-            "model_state_dict": state,
-            "step": step,
-            "loss": loss,
-            "tag": "latest",
-            "saved_at": time.time(),
-        }, tmp)
-        os.replace(tmp, path)  # atomic on POSIX; near-atomic on Windows
-        _save_lock.release()
-
-    if sync:
-        os.makedirs(save_dir, exist_ok=True)
-        path = os.path.join(save_dir, "checkpoint_latest.pt")
-        torch.save({
-            "model_state_dict": state,
-            "step": step,
-            "loss": loss,
-            "tag": "latest",
-            "saved_at": time.time(),
-        }, path)
-        return
-
-    # Async: acquire lock non-blocking — skip if a save is still running
-    if not _save_lock.acquire(blocking=False):
-        return
-
-    t = threading.Thread(target=_write, daemon=True)
-    t.start()
+    tmp = best_path + ".tmp"
+    torch.save({
+        "model_state_dict": state,
+        "step": step,
+        "loss": loss,
+        "tag": "best",
+        "saved_at": time.time(),
+    }, tmp)
+    os.replace(tmp, best_path)
+    return True
 
 
 def save_checkpoint(

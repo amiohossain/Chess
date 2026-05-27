@@ -13,13 +13,12 @@ import logging
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
 
 from src.config import ChessConfig
 from src.model.chess_net import ChessNet
 from src.model.losses import combined_loss
 from src.data.chess_dataset import ChessPositionDataset, RandomSliceDataset
-from src.utils.checkpoint import save_checkpoint, save_latest_weights, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_best_weights, load_checkpoint, find_latest_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -73,7 +72,6 @@ def train_supervised(config: ChessConfig, resume: bool = True):
 
     start_step = 0
     start_epoch = 0
-    best_loss = float("inf")
 
     if resume:
         latest_path = find_latest_checkpoint(config.paths.checkpoint_dir)
@@ -81,7 +79,6 @@ def train_supervised(config: ChessConfig, resume: bool = True):
             state = load_checkpoint(latest_path, model, optimizer, scheduler, device)
             start_step = state.get("step", 0)
             start_epoch = state.get("epoch", 0)
-            best_loss = state.get("loss", float("inf"))
             logger.info(f"Resumed from {latest_path} (step={start_step}, epoch={start_epoch})")
 
     model.train()
@@ -120,8 +117,16 @@ def train_supervised(config: ChessConfig, resume: bool = True):
             scheduler.step()
             global_step += 1
 
-            # Save weights every step — crash-safe resume
-            save_latest_weights(model, global_step, loss.item(), config.paths.checkpoint_dir)
+            # Save checkpoint every 10k steps + best-loss checkpoint
+            if global_step % config.training.checkpoint_every_n_steps == 0:
+                avg_loss = epoch_loss / max(batch_count, 1)
+                save_checkpoint(
+                    model, optimizer, scheduler,
+                    step=global_step, epoch=epoch, loss=avg_loss,
+                    tag=f"step_{global_step}",
+                )
+                if save_best_weights(model, global_step, avg_loss, config.paths.checkpoint_dir):
+                    logger.info(f">>> Best checkpoint updated at step {global_step} (loss={avg_loss:.4f})")
 
             epoch_loss += loss.item()
             with torch.no_grad():
@@ -153,15 +158,6 @@ def train_supervised(config: ChessConfig, resume: bool = True):
                     f"ETA {eta_sec/60:.0f}min ---"
                 )
 
-            if global_step % config.training.checkpoint_every_n_steps == 0:
-                avg_loss = epoch_loss / max(batch_count, 1)
-                save_checkpoint(
-                    model, optimizer, scheduler,
-                    step=global_step, epoch=epoch, loss=avg_loss,
-                    tag=f"step_{global_step}",
-                )
-                logger.info(f">>> Checkpoint saved at step {global_step}, loss={avg_loss:.4f}")
-
         epoch_time = time.time() - epoch_start
         avg_loss = epoch_loss / max(batch_count, 1)
         avg_acc = epoch_policy_acc / max(batch_count, 1)
@@ -170,10 +166,5 @@ def train_supervised(config: ChessConfig, resume: bool = True):
             f"loss={avg_loss:.4f} | policy_acc={avg_acc:.4f} | "
             f"time={epoch_time:.1f}s ({epoch_time/60:.1f}min) ==="
         )
-
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-            save_checkpoint(model, optimizer, scheduler, step=global_step, epoch=epoch, loss=avg_loss, tag="best")
-            logger.info(f">>> Best checkpoint saved (loss={avg_loss:.4f})")
 
     logger.info("=== Supervised training complete! ===")

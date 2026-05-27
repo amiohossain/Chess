@@ -23,7 +23,7 @@ from src.model.feature_encoder import encode_board, encode_move
 from src.model.losses import combined_loss
 from src.search.mcts import MCTS
 from src.inference.move_selector import select_move
-from src.utils.checkpoint import save_checkpoint, save_latest_weights, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_best_weights, load_checkpoint, find_latest_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +194,11 @@ def run_self_play_session(config: ChessConfig):
         train_loss += loss.item()
         self_play_step += 1
 
-        # Save weights every step — crash-safe resume
-        save_latest_weights(model, self_play_step, loss.item(), config.paths.checkpoint_dir)
+        # Save checkpoint every 10k steps
+        if self_play_step % 10000 == 0:
+            save_checkpoint(model, optimizer, step=self_play_step, epoch=0, loss=loss.item(), tag=f"sp_{self_play_step}")
+            if save_best_weights(model, self_play_step, loss.item(), config.paths.checkpoint_dir):
+                logger.info(f">>> Best checkpoint updated at step {self_play_step} (loss={loss.item():.4f})")
 
         # Per-step log
         logger.info(
@@ -221,3 +224,4 @@ def run_self_play_session(config: ChessConfig):
 
     save_checkpoint(model, optimizer, step=self_play_step, epoch=0, loss=avg_loss, tag=f"self_play_{int(time.time())}")
     logger.info(">>> Self-play checkpoint saved")
+    save_best_weights(model, self_play_step, avg_loss, config.paths.checkpoint_dir)

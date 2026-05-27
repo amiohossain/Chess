@@ -15,7 +15,7 @@ from src.model.chess_net import ChessNet
 from src.model.losses import combined_loss
 from src.data.chess_dataset import ChessPositionDataset
 from src.data.trap_dataset import TrapDataset
-from src.utils.checkpoint import save_checkpoint, save_latest_weights, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_best_weights, load_checkpoint, find_latest_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +109,6 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
             optimizer.zero_grad()
             global_step += 1
 
-            # Save weights every step — crash-safe resume
-            save_latest_weights(model, global_step, loss.item(), config.paths.checkpoint_dir)
-
             epoch_loss += loss.item()
             with torch.no_grad():
                 pred = policy_logits.argmax(dim=-1)
@@ -141,6 +138,8 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 )
                 save_checkpoint(model, optimizer, step=global_step, epoch=epoch, loss=avg_loss, tag=f"trap_step_{global_step}")
                 logger.info(f">>> Trap checkpoint saved at step {global_step}")
+                if save_best_weights(model, global_step, avg_loss, config.paths.checkpoint_dir):
+                    logger.info(f">>> Best checkpoint updated at step {global_step} (loss={avg_loss:.4f})")
 
         epoch_time = time.time() - epoch_start
         avg_loss = epoch_loss / max(batch_count, 1)
