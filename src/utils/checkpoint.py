@@ -32,10 +32,19 @@ def init_lfs_and_auth(token: str = None) -> None:
     """
     global _git_token
     if token:
-        _git_token = token
-        logger.info(f"Git token stored ({len(token)} chars)")
+        _git_token = token.strip() if isinstance(token, str) else token
+        logger.info(f"Git token stored ({len(_git_token)} chars)")
     elif not _git_token:
         _git_token = os.environ.get("GITHUB_TOKEN")
+    if not _git_token:
+        # Fallback: try Kaggle Secrets directly
+        try:
+            from kaggle_secrets import UserSecretsClient
+            token = UserSecretsClient().get_secret("GITHUB_TOKEN")
+            if token:
+                _git_token = token.strip()
+        except Exception:
+            pass
         if _git_token:
             logger.info(f"Git token loaded from env ({len(_git_token)} chars)")
 
