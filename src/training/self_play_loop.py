@@ -23,7 +23,7 @@ from src.model.feature_encoder import encode_board, encode_move
 from src.model.losses import combined_loss
 from src.search.mcts import MCTS
 from src.inference.move_selector import select_move
-from src.utils.checkpoint import save_checkpoint, save_best_weights, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_best_weights, sync_checkpoint_to_git, load_checkpoint, find_latest_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +199,7 @@ def run_self_play_session(config: ChessConfig):
             save_checkpoint(model, optimizer, step=self_play_step, epoch=0, loss=loss.item(), tag=f"sp_{self_play_step}")
             if save_best_weights(model, self_play_step, loss.item(), config.paths.checkpoint_dir):
                 logger.info(f">>> Best checkpoint updated at step {self_play_step} (loss={loss.item():.4f})")
+                sync_checkpoint_to_git(config.paths.checkpoint_dir, self_play_step)
 
         # Per-step log
         logger.info(
@@ -224,4 +225,5 @@ def run_self_play_session(config: ChessConfig):
 
     save_checkpoint(model, optimizer, step=self_play_step, epoch=0, loss=avg_loss, tag=f"self_play_{int(time.time())}")
     logger.info(">>> Self-play checkpoint saved")
-    save_best_weights(model, self_play_step, avg_loss, config.paths.checkpoint_dir)
+    if save_best_weights(model, self_play_step, avg_loss, config.paths.checkpoint_dir):
+        sync_checkpoint_to_git(config.paths.checkpoint_dir, self_play_step)

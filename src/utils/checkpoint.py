@@ -4,12 +4,89 @@ Supports:
   - Saving model, optimizer, scheduler state
   - Resuming from the latest checkpoint
   - Best-loss checkpoint (only overwritten on improvement)
+  - Git LFS sync for checkpoint persistence across Kaggle sessions
 """
 import os
 import glob
 import time
+import logging
+import threading
+import subprocess
 import torch
 from src.config import PathConfig
+
+logger = logging.getLogger(__name__)
+
+# -- git sync state --
+_git_sync_lock = threading.Lock()
+
+
+def init_lfs_and_auth(token: str = None) -> None:
+    """Initialize Git LFS and configure auth for checkpoint persistence.
+
+    Call once at startup (e.g. in Kaggle notebook Cell 1) to restore
+    previously-pushed checkpoints via ``git lfs checkout``.
+    """
+    try:
+        subprocess.run(["git", "lfs", "install"], capture_output=True, check=True)
+        logger.info("Git LFS installed")
+    except Exception as e:
+        logger.warning(f"git lfs install failed: {e}")
+        return
+
+    # Configure git user (needed for commits)
+    for cfg, val in [("user.email", "kaggle@chess.ai"), ("user.name", "Kaggle Trainer")]:
+        subprocess.run(["git", "config", cfg, val], capture_output=True)
+
+    # Inject token into remote URL for authenticated pushes
+    if token:
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                capture_output=True, text=True, check=True,
+            )
+            url = result.stdout.strip()
+            # Insert token into https:// URL
+            if url.startswith("https://") and "@" not in url:
+                authed_url = url.replace("https://", f"https://{token}@")
+                subprocess.run(["git", "remote", "set-url", "origin", authed_url], capture_output=True, check=True)
+                logger.info("Git remote configured with token auth")
+        except Exception as e:
+            logger.warning(f"Git remote setup failed: {e}")
+
+    # Restore previously-pushed LFS objects
+    try:
+        subprocess.run(["git", "lfs", "fetch"], capture_output=True, check=True)
+        subprocess.run(["git", "lfs", "checkout"], capture_output=True, check=True)
+        logger.info("LFS objects restored from remote")
+    except Exception as e:
+        logger.warning(f"LFS restore failed (expected on first run): {e}")
+
+
+def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
+    """Push checkpoint files to Git LFS in a background thread.
+
+    If a previous sync is still in progress, this call is dropped.
+    """
+    if not _git_sync_lock.acquire(blocking=False):
+        return
+
+    def _sync():
+        try:
+            subprocess.run(["git", "add", os.path.join(save_dir, "*.pt")], capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"checkpoint step {step}"],
+                capture_output=True,
+            )
+            subprocess.run(["git", "push", "origin", "main"], capture_output=True)
+            logger.info(f"Checkpoint synced to git at step {step}")
+        except Exception as e:
+            logger.warning(f"Git sync failed at step {step}: {e}")
+        finally:
+            _git_sync_lock.release()
+
+    t = threading.Thread(target=_sync, daemon=True)
+    t.start()
 
 
 def _best_loss_path(save_dir: str) -> str:

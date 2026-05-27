@@ -18,7 +18,7 @@ from src.config import ChessConfig
 from src.model.chess_net import ChessNet
 from src.model.losses import combined_loss
 from src.data.chess_dataset import ChessPositionDataset, RandomSliceDataset
-from src.utils.checkpoint import save_checkpoint, save_best_weights, load_checkpoint, find_latest_checkpoint
+from src.utils.checkpoint import save_checkpoint, save_best_weights, sync_checkpoint_to_git, load_checkpoint, find_latest_checkpoint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
                 )
                 if save_best_weights(model, global_step, avg_loss, config.paths.checkpoint_dir):
                     logger.info(f">>> Best checkpoint updated at step {global_step} (loss={avg_loss:.4f})")
+                    sync_checkpoint_to_git(config.paths.checkpoint_dir, global_step)
 
             epoch_loss += loss.item()
             with torch.no_grad():
