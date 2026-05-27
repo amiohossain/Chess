@@ -84,7 +84,7 @@ def find_latest_checkpoint(checkpoint_dir: str) -> str:
     return max(files, key=os.path.getmtime)
 
 
-def save_for_kaggle(checkpoint_path: str, kaggle_dataset_name: str = "chess-training-data") -> None:
+def save_for_kaggle(checkpoint_path: str, kaggle_dataset_name: str = "chess-training-data-2013") -> None:
     """Print instructions for uploading checkpoint to Kaggle Dataset."""
     print(f"Checkpoint saved at {checkpoint_path}")
     print(f"To upload to Kaggle Dataset '{kaggle_dataset_name}':")

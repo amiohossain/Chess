@@ -1,0 +1,13 @@
+{
+  "id": "amiohossain/chess-training",
+  "title": "Chess Training",
+  "code_file": "kaggle_notebook.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": ["amiohossain/chess-training-data-2013"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

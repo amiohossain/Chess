@@ -127,7 +127,7 @@ def run_self_play_session(config: ChessConfig):
         y_value = batch["y_value"].to(device, non_blocking=True)
         legal_masks = batch["legal_mask"].to(device, non_blocking=True)
 
-        with autocast(device_type="cuda", enabled=(config.training.mixed_precision == "fp16")):
+        with autocast(enabled=(config.training.mixed_precision == "fp16")):
             policy_logits, value_pred = model(X)
             loss = combined_loss(policy_logits, y_policy, value_pred, y_value, legal_masks, config.training)
 

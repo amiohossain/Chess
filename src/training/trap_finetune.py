@@ -77,7 +77,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 torch.ones(len(trap_batch["X"])) * config.training.trap_loss_weight,
             ]).to(device, non_blocking=True)
 
-            with autocast(device_type="cuda", enabled=(config.training.mixed_precision == "fp16")):
+            with autocast(enabled=(config.training.mixed_precision == "fp16")):
                 policy_logits, value_pred = model(X)
                 loss = combined_loss(
                     policy_logits, y_policy, value_pred, y_value,
