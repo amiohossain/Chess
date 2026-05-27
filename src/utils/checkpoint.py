@@ -73,23 +73,31 @@ def sync_checkpoint_to_git(save_dir: str, step: int) -> None:
 
     def _sync():
         try:
+            # The git repo root is one level above save_dir (e.g. /kaggle/working/Chess)
+            repo_root = os.path.dirname(os.path.normpath(save_dir))
+
             # Only sync checkpoint_best.pt — skip periodic full checkpoints to save LFS storage
             best_path = os.path.join(save_dir, "checkpoint_best.pt")
             if not os.path.exists(best_path):
                 logger.warning(f"Git sync: {best_path} not found — nothing to sync")
                 return
 
-            add = subprocess.run(["git", "add", best_path], capture_output=True, text=True)
+            add = subprocess.run(
+                ["git", "add", best_path], capture_output=True, text=True, cwd=repo_root,
+            )
             if add.returncode != 0:
                 logger.warning(f"Git add failed: {add.stderr.strip()}")
                 return
 
             subprocess.run(
                 ["git", "commit", "-m", f"checkpoint step {step}"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, cwd=repo_root,
             )
 
-            push = subprocess.run(["git", "push", "origin", "HEAD:checkpoints"], capture_output=True, text=True)
+            push = subprocess.run(
+                ["git", "push", "origin", "HEAD:checkpoints"],
+                capture_output=True, text=True, cwd=repo_root,
+            )
             if push.returncode != 0:
                 logger.warning(f"Git push failed: {push.stderr.strip()}")
                 return
