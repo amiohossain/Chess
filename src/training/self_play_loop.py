@@ -15,7 +15,7 @@ import torch.optim as optim
 import numpy as np
 import chess
 from torch.utils.data import Dataset, DataLoader
-from torch.cuda.amp import autocast, GradScaler
+# GradScaler/autocast from torch.amp to avoid deprecation warnings
 
 from src.config import ChessConfig
 from src.model.chess_net import ChessNet
@@ -107,7 +107,7 @@ def run_self_play_session(config: ChessConfig):
         raise FileNotFoundError("No checkpoint found -- train Phase 1 first!")
 
     optimizer = optim.AdamW(model.parameters(), lr=config.training.learning_rate * 0.05)
-    scaler = GradScaler(enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
 
     replay_buffer = ReplayBuffer(config.self_play.replay_buffer_size)
 
@@ -173,7 +173,7 @@ def run_self_play_session(config: ChessConfig):
         y_value = batch["y_value"].to(device, non_blocking=True)
         legal_masks = batch["legal_mask"].to(device, non_blocking=True)
 
-        with autocast(enabled=(config.training.mixed_precision == "fp16")):
+        with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
             policy_logits, value_pred = model(X)
             loss = combined_loss(policy_logits, y_policy, value_pred, y_value, legal_masks, config.training)
 

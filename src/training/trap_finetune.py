@@ -8,7 +8,7 @@ import logging
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from torch.cuda.amp import autocast, GradScaler
+# GradScaler/autocast from torch.amp to avoid deprecation warnings
 
 from src.config import ChessConfig
 from src.model.chess_net import ChessNet
@@ -41,7 +41,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
         lr=config.training.learning_rate * 0.1,
         weight_decay=config.training.weight_decay,
     )
-    scaler = GradScaler(enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
 
     general_dataset = ChessPositionDataset(config.paths.supervised_data_path, max_samples=500_000)
     trap_dataset = TrapDataset(config.paths.trap_data_path)
@@ -71,6 +71,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
     log_interval = 200
 
     for epoch in range(10):
+        logger.info(f"--- Trap epoch {epoch} ---")
         epoch_loss = 0.0
         trap_acc = 0.0
         batch_count = 0
@@ -89,7 +90,7 @@ def train_trap_specialization(config: ChessConfig, resume: bool = True):
                 torch.ones(len(trap_batch["X"])) * config.training.trap_loss_weight,
             ]).to(device, non_blocking=True)
 
-            with autocast(enabled=(config.training.mixed_precision == "fp16")):
+            with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
                 policy_logits, value_pred = model(X)
                 loss = combined_loss(
                     policy_logits, y_policy, value_pred, y_value,

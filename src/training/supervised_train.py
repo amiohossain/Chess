@@ -46,7 +46,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
         eta_min=config.training.min_learning_rate,
     )
 
-    scaler = GradScaler(enabled=(config.training.mixed_precision == "fp16"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(config.training.mixed_precision == "fp16"))
 
     dataset = ChessPositionDataset(config.paths.supervised_data_path)
     logger.info(f"Dataset: {dataset.num_positions:,} total positions available")
@@ -84,11 +84,12 @@ def train_supervised(config: ChessConfig, resume: bool = True):
 
     model.train()
     global_step = start_step
-    log_interval = 500
+    log_interval = 100
     accum_time = 0.0
     accum_batches = 0
 
     for epoch in range(start_epoch, 1000):
+        logger.info(f"--- Starting epoch {epoch} at global_step {global_step:,} ---")
         epoch_loss = 0.0
         epoch_policy_acc = 0.0
         batch_count = 0
@@ -102,7 +103,7 @@ def train_supervised(config: ChessConfig, resume: bool = True):
             y_value = batch["y_value"].to(device, non_blocking=True)
             legal_masks = batch["legal_mask"].to(device, non_blocking=True)
 
-            with autocast(enabled=(config.training.mixed_precision == "fp16")):
+            with torch.amp.autocast('cuda', enabled=(config.training.mixed_precision == "fp16")):
                 policy_logits, value_pred = model(X)
                 loss = combined_loss(
                     policy_logits, y_policy, value_pred, y_value,
